@@ -2459,7 +2459,7 @@ class ChannelmapGUI(param.Parameterized):
                 "<b>Pitch</b> = AP tilt (probe leaning forward / backward). "
                 "<b>Yaw</b> = ML tilt (probe leaning left / right). "
                 "<b>Shank orientation</b> = direction of shanks 0→3 in the "
-                "horizontal plane; 0° = lateral (+ML), 90° = anterior (+AP)."
+                "horizontal plane; 0° = lateral (+ML), 90° = posterior (+AP)."
                 "</div>"
             ),
             sizing_mode="stretch_width",

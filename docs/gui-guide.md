@@ -251,14 +251,14 @@ A **locator figure** above the legend shows three orthogonal brain-atlas slices 
 | Field | Units | Description |
 |---|---|---|
 | **Atlas** | — | [BrainGlobe](https://brainglobe.info) atlas identifier. Defaults to `allen_mouse_25um`. Any atlas in the BrainGlobe registry can be selected; undownloaded atlases are downloaded on first compute. |
-| **Tip AP / ML / DV** | µm (atlas) | Position of the probe's lowest electrode (shank 0 tip) in the atlas's canonical (AP, ML, DV) frame. AP increases anteriorly; ML increases to the right of midline; DV increases ventrally. In bregma mode these fields become stereotaxic offsets from the landmark (see below). |
-| **Pitch** | degrees | AP tilt of the probe shaft. `0` = perfectly vertical. Positive values tip the top of the probe forward (toward +AP). Corresponds to the rotation of the stereotaxic arm around the ML axis. |
-| **Yaw** | degrees | ML tilt of the probe shaft. `0` = perfectly vertical. Positive values tip the top of the probe to the right (toward +ML). Corresponds to rotation around the AP axis. |
-| **Shank orientation** | degrees | For multi-shank probes only: rotation of the shank line around the probe's own long axis. `0°` = shanks arrayed along +ML (probe inserted side-on); `90°` = shanks arrayed along +AP (probe inserted front-to-back). Has no effect on single-shank probes. |
+| **Tip AP / ML / DV** | µm (atlas) | Position of the probe's lowest electrode (shank 0 tip) in the atlas's canonical (AP, ML, DV) frame. All three axes are measured from the anterior-superior-**right** corner of the volume, so all three count *into* the brain: AP increases **posteriorly**, ML increases toward the **left**, DV increases **ventrally**. In bregma mode these fields become stereotaxic offsets from the landmark, which flips AP and ML back to the usual convention (see below). |
+| **Pitch** | degrees | AP tilt of the probe shaft. `0` = perfectly vertical. Positive values tip the top of the probe **backward** (toward +AP, i.e. posteriorly), so the tip ends up anterior of the entry point. Corresponds to the rotation of the stereotaxic arm around the ML axis. |
+| **Yaw** | degrees | ML tilt of the probe shaft. `0` = perfectly vertical. Positive values tip the top of the probe to the **left** (toward +ML), so the tip ends up to the right of the entry point. Corresponds to rotation around the AP axis. |
+| **Shank orientation** | degrees | For multi-shank probes only: rotation of the shank line around the probe's own long axis. `0°` = shanks arrayed along +ML (toward the left; probe inserted side-on); `90°` = shanks arrayed along +AP (posteriorly; probe inserted front-to-back). Has no effect on single-shank probes. |
 
 ### Bregma-relative coordinate mode
 
-Tick **Tip relative to bregma** to switch from absolute atlas coordinates to stereotaxic coordinates measured from a skull landmark. When active, the Tip AP/ML/DV fields accept offsets from bregma (or the anterior commissure, for non-rodent atlases) in µm, following the standard neuroscience convention: AP positive = anterior, ML positive = right of midline, DV positive = ventral (deeper).
+Tick **Tip relative to bregma** to switch from absolute atlas coordinates to stereotaxic coordinates measured from a skull landmark. When active, the Tip AP/ML/DV fields accept offsets from bregma (or the anterior commissure, for non-rodent atlases) in µm, following the standard neuroscience convention: AP positive = anterior, ML positive = left of midline, DV positive = ventral (deeper).
 
 Three additional fields become editable in this mode:
 

@@ -53,7 +53,9 @@ class TestPitch:
                              tip_atlas=(5000, 2500, 3000), pitch_deg=90)
         np.testing.assert_allclose(out[0], (5100, 2500, 3000), atol=TOL)
 
-    def test_positive_pitch_tips_top_anterior(self):
+    def test_positive_pitch_tips_top_posterior(self):
+        # +AP is *posterior* in the canonical atlas frame (µm from the
+        # anterior pole), so the top of the probe swings back, not forward.
         out = probe_to_atlas(np.array([[0.0, 100.0]]),
                              tip_atlas=(5000, 2500, 3000), pitch_deg=30)
         assert out[0, 0] > 5000, "expected +AP shift"

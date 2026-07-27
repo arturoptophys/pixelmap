@@ -11,23 +11,30 @@ Conventions used throughout this module:
     the *lowest electrode* (the user picks the tip coordinate to match
     that reference, so the math stays clean).
 
-* **Atlas frame** (3D, µm): brainglobe's standard ``(AP, ML, DV)`` ordering
-  for Allen CCF mouse. AP is anterior(+); ML is the lateral axis where +
-  is to the right of the midline; DV is the depth axis, + meaning ventral
-  (so going dorsal/up = decreasing DV).
+* **Atlas frame** (3D, µm): brainglobe's standard ``(AP, ML, DV)`` ordering,
+  measured from the anterior-superior-right corner of the canonical volume
+  (see :func:`pixelmap.anatomy.atlas.canonical_annotation`). Every axis
+  counts *away* from that corner, so all three are positive-going into the
+  brain: **+AP is posterior**, **+ML is left**, **+DV is ventral** (going
+  dorsal/up = decreasing DV).
+
+  Note this is the *atlas array* frame, not the stereotaxic convention. The
+  bregma-relative mode flips AP and ML back to the usual "+ anterior, +
+  left" reading — see :func:`bregma_to_atlas_um`.
 
 * **Pose** — three independent angles around fixed atlas axes plus a spin
   around the probe's own long axis:
 
   * ``tip_atlas`` — atlas position of the shank-0 lowest electrode.
   * ``pitch_deg`` — *AP tilt*. Rotation around the world ML axis. ``0`` is
-    vertical; positive tips the top of the probe forward (+AP).
+    vertical; positive tips the top of the probe posteriorly (+AP), i.e.
+    the tip ends up anterior of the entry point.
   * ``yaw_deg`` — *ML tilt*. Rotation around the world AP axis. ``0`` is
-    vertical; positive tips the top of the probe to the right (+ML).
+    vertical; positive tips the top of the probe to the left (+ML).
   * ``shank_orientation_deg`` — *shank line direction*. Rotation of the
     shank line around the probe's own long axis. ``0`` = shanks along +ML
-    (the "side-on" insertion), ``90`` = along +AP (anterior), ``180`` =
-    along -ML, ``270`` = along -AP. Only matters for multi-shank probes.
+    (left; the "side-on" insertion), ``90`` = along +AP (posterior),
+    ``180`` = along -ML, ``270`` = along -AP. Multi-shank probes only.
 
 Order of composition: spin (in the probe's local frame) → pitch → yaw, so
 that pitch and yaw remain the literal AP/ML tilts of the stereotax arm
@@ -79,7 +86,8 @@ def bregma_to_atlas_um(
 
 
 def _R_pitch(pitch_rad: float) -> np.ndarray:
-    """AP tilt — rotation around world ML axis. ``probe-y`` rotates -DV → +AP."""
+    """AP tilt — rotation around world ML axis. ``probe-y`` rotates -DV → +AP
+    (i.e. the top of the probe swings *posteriorly*; see module docstring)."""
     cp, sp = np.cos(pitch_rad), np.sin(pitch_rad)
     return np.array([
         [cp, 0.0, -sp],
@@ -89,7 +97,8 @@ def _R_pitch(pitch_rad: float) -> np.ndarray:
 
 
 def _R_yaw(yaw_rad: float) -> np.ndarray:
-    """ML tilt — rotation around world AP axis. ``probe-y`` rotates -DV → +ML."""
+    """ML tilt — rotation around world AP axis. ``probe-y`` rotates -DV → +ML
+    (i.e. the top of the probe swings to the *left*; see module docstring)."""
     cy, sy = np.cos(yaw_rad), np.sin(yaw_rad)
     return np.array([
         [1.0, 0.0, 0.0],
