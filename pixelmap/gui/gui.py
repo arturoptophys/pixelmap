@@ -2048,9 +2048,81 @@ class ChannelmapGUI(param.Parameterized):
     ##### Survey overlay handlers #####
     ###################################
 
+    def _survey_file_content(self) -> str | None:
+        """Decoded text of the uploaded survey file, or None if nothing is uploaded."""
+        content = self.survey_file_loader.value
+        if content is None:
+            return None
+        if isinstance(content, bytes):
+            content = content.decode("utf-8")
+        return content
+
+    def _survey_file_is_json(self) -> bool:
+        extension = str(self.survey_file_loader.filename).split(".")[-1].lower()
+        if extension == "json":
+            return True
+        content = self._survey_file_content()
+        return content is not None and survey.is_openephys_survey(content)
+
+    def _on_survey_file_change(self, _event=None):
+        """Populate the probe selector when an Open Ephys JSON with several probes is uploaded."""
+        self.survey_probe_selector.options = {}
+        self.survey_probe_selector.visible = False
+        content = self._survey_file_content()
+        if content is None or not self._survey_file_is_json():
+            return
+        try:
+            probes = survey.parse_openephys_survey_json(content)
+        except ValueError:
+            return  # reported when the user presses "Load survey overlay"
+        if len(probes) < 2:
+            return
+        self.survey_probe_selector.options = {p.label: i for i, p in enumerate(probes)}
+        # Preselect the first probe matching the probe type currently shown.
+        default = next(
+            (i for i, p in enumerate(probes) if p.probe_type == self.probe_type), 0
+        )
+        self.survey_probe_selector.value = default
+        self.survey_probe_selector.visible = True
+
+    def _parse_openephys_survey(self, content: str) -> pd.DataFrame | None:
+        """Pick one probe from an Open Ephys survey JSON; notify and return None on error."""
+        try:
+            probes = survey.parse_openephys_survey_json(content)
+        except ValueError as e:
+            _notify("error", f"Failed to parse survey file: {e}", duration=10_000)
+            return None
+
+        idx = self.survey_probe_selector.value if len(probes) > 1 else 0
+        if idx is None or not 0 <= idx < len(probes):
+            idx = 0
+        probe = probes[idx]
+        if probe.probe_type is None:
+            _notify(
+                "error",
+                f"Survey probe '{probe.label}' is a type PixelMap does not support.",
+                duration=10_000,
+            )
+            return None
+        if probe.probe_type != self.probe_type:
+            _notify(
+                "error",
+                f"Survey probe '{probe.label}' is a PixelMap '{probe.probe_type}' probe, "
+                f"but '{self.probe_type}' is selected. Switch the probe type first"
+                + (" or pick another probe from the survey file." if len(probes) > 1 else "."),
+                duration=10_000,
+            )
+            return None
+        return probe.survey_df
+
     def load_survey_file(self):
-        """Parse an uploaded SpikeGLX survey .txt file and overlay Val on the probe."""
-        if self.survey_file_loader.value is None:
+        """Parse an uploaded survey file and overlay its values on the probe.
+
+        Accepts SpikeGLX shank-viewer exports (.txt/.tsv: Shank, Xum, Zum, Val)
+        and Open Ephys Neuropix-PXI survey exports (.json, peak-to-peak amplitude).
+        """
+        content = self._survey_file_content()
+        if content is None:
             _notify(
                 "warning",
                 "No survey file found - upload one before clicking this button.",
@@ -2059,23 +2131,26 @@ class ChannelmapGUI(param.Parameterized):
             return
 
         file_extension = str(self.survey_file_loader.filename).split(".")[-1].lower()
-        if file_extension not in ("txt", "tsv"):
+        if file_extension not in ("txt", "tsv", "json"):
             _notify(
                 "error",
-                f"You must upload a .txt survey file, not .{file_extension}!",
+                "You must upload a SpikeGLX .txt or Open Ephys .json survey file, "
+                f"not .{file_extension}!",
                 duration=10_000,
             )
             return
 
-        content = self.survey_file_loader.value
-        if isinstance(content, bytes):
-            content = content.decode("utf-8")
-
-        try:
-            survey_df = survey.parse_survey_file(content)
-        except ValueError as e:
-            _notify("error", f"Failed to parse survey file: {e}", duration=10_000)
-            return
+        is_json = self._survey_file_is_json()
+        if is_json:
+            survey_df = self._parse_openephys_survey(content)
+            if survey_df is None:
+                return
+        else:
+            try:
+                survey_df = survey.parse_survey_file(content)
+            except ValueError as e:
+                _notify("error", f"Failed to parse survey file: {e}", duration=10_000)
+                return
 
         try:
             values, n_unmatched = survey.validate_probe_match(survey_df, self.positions_df)
@@ -2098,6 +2173,9 @@ class ChannelmapGUI(param.Parameterized):
         self.survey_cmap.high = vmax
         if self.survey_color_bar is not None:
             self.survey_color_bar.visible = True
+            self.survey_color_bar_title.text = (
+                "Survey value (peak-to-peak)" if is_json else "Survey value"
+            )
             self.survey_color_bar_title.visible = True
 
         self.update_electrode_colors()
@@ -2824,8 +2902,13 @@ class ChannelmapGUI(param.Parameterized):
         )
         self.apply_uploaded_imro_button.on_click(lambda event: self.apply_uploaded_imro())
 
-        # Survey (.txt) overlay widgets
-        self.survey_file_loader = pn.widgets.FileInput(accept=".txt,.tsv", width=300)
+        # Survey overlay widgets (SpikeGLX .txt or Open Ephys .json)
+        self.survey_file_loader = pn.widgets.FileInput(accept=".txt,.tsv,.json", width=300)
+        self.survey_file_loader.param.watch(self._on_survey_file_change, "value")
+        # Only shown for Open Ephys JSON files that contain several probes.
+        self.survey_probe_selector = pn.widgets.Select(
+            name="Probe in survey file", options={}, width=300, visible=False
+        )
         self.apply_survey_button = pn.widgets.Button(
             name="Load survey overlay ⬆", button_type="primary", width=160
         )
@@ -3090,6 +3173,7 @@ class ChannelmapGUI(param.Parameterized):
             pn.Column(
                 pn.pane.Markdown("## Survey overlay ⚡", margin=(-5, 0, 0, 0)),
                 self.survey_file_loader,
+                self.survey_probe_selector,
                 pn.Row(self.apply_survey_button, self.clear_survey_button),
                 pn.Row(self.survey_vmin_input, self.survey_vmax_input),
                 styles={"background": "#e6e6e6", "padding": "10px", "border-radius": "5px"},
@@ -3213,6 +3297,9 @@ class ChannelmapGUI(param.Parameterized):
         self.survey_values = None
         if hasattr(self, "survey_vmin_input"):
             self._set_survey_range_inputs(None, None, enabled=False)
+        if hasattr(self, "survey_probe_selector"):
+            # Re-pick the default probe in a multi-probe JSON for the new type.
+            self._on_survey_file_change()
 
         self.clear_anatomy_overlay()
         self.clear_bokeh_data()

@@ -154,14 +154,14 @@ This is really useful if you want to slightly edit a pre-existing channelmap! Up
 
 You can optionally overlay the probe plot with additional information critical to guide your channelmap design.
 
-First, you can overlay a heatmap encoding a **SpikeGLX activity survey** across all sites after implantation to identify the sites with most activity. Because recording in white matter is common and yields fewer units than recording from neuron somata, tailoring your channelmap to areas with high spiking activity (which is likely to be grey matter) can dramatically increase the unit yield of your recordings. For more details on how to run a survey and export the data, see the [SpikeGLX survey overlay section below](#power-feature-1-spikeglx-activity-survey-overlay).
+First, you can overlay a heatmap encoding a **SpikeGLX or Open Ephys activity survey** across all sites after implantation to identify the sites with most activity. Because recording in white matter is common and yields fewer units than recording from neuron somata, tailoring your channelmap to areas with high spiking activity (which is likely to be grey matter) can dramatically increase the unit yield of your recordings. For more details on how to run a survey and export the data, see the [activity survey overlay section below](#power-feature-1-activity-survey-overlay).
 
 
 Second, you can overlay **anatomical region boundaries** from any brain atlas available in [brainglobe](https://brainglobe.info/index.html) to plan your channelmap around specific brain regions of interest. For more details on how to compute and interpret the anatomical overlay, see the [anatomical overlay section below](#power-feature-2-anatomical-overlay).
 
 The most powerful workflow is to use both together:
 1. Before implantation, use the anatomical overlay to plan a channelmap that covers your target brain regions.
-2. After implantation, either chronic or, if you're quick about it, acute, run a quick survey recording in SpikeGLX. Export the activity survey, and load it as an overlay in PixelMap to visually identify the most active sites.
+2. After implantation, either chronic or, if you're quick about it, acute, run a quick survey recording in SpikeGLX or Open Ephys. Export the activity survey, and load it as an overlay in PixelMap to visually identify the most active sites.
 3. Adjust your predicted anatomy overlay by moving your probe around to match the ephys activity map (which is the only thing you can actually trust!).
 4. Build your channelmap to select sites in your brain regions of interest.
 
@@ -200,17 +200,24 @@ Hit record, and off you go!
 To spikesort your data, make sure to feed the imro table to your favorite spike-sorter. E.g. for Kilosort, simply use the Kilosort txt file that you can download from PixelMap alongside the `.imro` and pdf files.
 ___
 
-## ⚡ Power Feature 1: SpikeGLX Activity Survey Overlay 
+## ⚡ Power Feature 1: Activity Survey Overlay
 
-SpikeGLX can export a per-contact activity survey as a `.txt` file (tab-separated columns `Shank`, `Xum`, `Zum`, `Val`). `Val` is a metric of your choice — spike rate, spike amplitude, LFP power, etc. — recorded across all contacts during a survey recording. PixelMap overlays these values *alongside* the probe so you can visually identify the most active contacts before committing to a channelmap.
+PixelMap accepts two survey formats:
 
-PixelMap draws a thin colored **sidebar bar** just outside the shank outline for each contact — a "mirror image" of the contact column. Each bar is colored by that contact's `Val` using a Viridis colormap. Left-column contacts get a bar on the left of the outline; right-column contacts get a bar on the right.
+- **SpikeGLX** exports a per-contact activity survey as a `.txt` file (tab-separated columns `Shank`, `Xum`, `Zum`, `Val`). `Val` is a metric of your choice — spike rate, spike amplitude, LFP power, etc. — recorded across all contacts during a survey recording.
+- **Open Ephys** (Neuropix-PXI plugin) saves survey results as a `.json` file holding the AP-band **peak-to-peak amplitude** of every surveyed contact, for every probe included in the survey.
+
+PixelMap overlays these values *alongside* the probe so you can visually identify the most active contacts before committing to a channelmap.
+
+PixelMap draws a thin colored **sidebar bar** just outside the shank outline for each contact — a "mirror image" of the contact column. Each bar is colored by that contact's value using a Viridis colormap. Left-column contacts get a bar on the left of the outline; right-column contacts get a bar on the right.
 
 ### Exporting and loading a survey
 
-1. In SpikeGLX, run a survey recording. Offline, load the recording and open up the graphical shank viewer. Under the **View** tab, select *Sample whole survey* and click the update button to have SpikeGLX compute activity across all contacts. Use the **Export Map** button to save a survey `.txt` file.
+1. Export the survey:
+   - **SpikeGLX:** run a survey recording. Offline, load the recording and open up the graphical shank viewer. Under the **View** tab, select *Sample whole survey* and click the update button to have SpikeGLX compute activity across all contacts. Use the **Export Map** button to save a survey `.txt` file.
+   - **Open Ephys:** in the Neuropix-PXI plugin's **Survey** tab, run the survey, then press the save button to write the results to a `.json` file.
 2. In PixelMap, expand the **Survey overlay** section in the left panel.
-3. Click the file picker and choose your survey `.txt` file.
+3. Click the file picker and choose your survey `.txt` or `.json` file. If an Open Ephys file contains several probes, a **Probe in survey file** dropdown appears; it preselects the first probe matching the probe type shown in PixelMap.
 4. Press **Load survey overlay**. A Viridis-colored bar appears just outside the shank outline next to each contact, and a colorbar labeled *Survey Val* appears above the plot.
 
 ### Reading the overlay
@@ -218,7 +225,7 @@ PixelMap draws a thin colored **sidebar bar** just outside the shank outline for
 - **The contacts keep their normal coloring** — red (selected), black (unavailable), light gray (available) — so your selection and the ADC constraints stay fully visible.
 - The **sidebar bars** flanking the shank are colored by `Val`. The colorbar above the plot shows the current min/max range.
 - Bars for **unavailable contacts** (ADC conflicts) are dimmed (reduced opacity) so they're distinguishable from available ones.
-- Contacts with no matching survey value get a neutral gray bar.
+- Contacts with no matching survey value get a neutral gray bar. For Open Ephys surveys this includes contacts in banks or shanks that were left out of the survey.
 - Hover over a contact to see its exact `Survey value` in the tooltip.
 
 ### Adjusting the colormap range
@@ -230,7 +237,7 @@ The **vmin** and **vmax** inputs are auto-populated with the file's 2nd and 98th
 Click **Clear overlay** to remove the survey overlay. The overlay is also cleared automatically when you switch probe types, since contact positions differ across probe types.
 
 :::{note}
-The survey file must have been exported from the **same probe type** currently selected in PixelMap. If the file comes from a different probe, PixelMap will show an error notification rather than silently displaying a mismatched overlay.
+The survey file must have been exported from the **same probe type** currently selected in PixelMap. Open Ephys files record the probe type, so PixelMap checks it directly and tells you which type to switch to. If the file comes from a different probe, PixelMap will show an error notification rather than silently displaying a mismatched overlay.
 :::
 
 ___

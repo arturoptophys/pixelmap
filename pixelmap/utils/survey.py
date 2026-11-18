@@ -1,7 +1,9 @@
-################################
-## SpikeGLX survey file I/O   ##
-################################
+########################################
+## SpikeGLX / Open Ephys survey I/O   ##
+########################################
 
+import json
+from dataclasses import dataclass
 from io import StringIO
 
 import numpy as np
@@ -87,6 +89,102 @@ def parse_survey_file(content: str) -> pd.DataFrame:
         .astype({"shank": int, "xum": int, "zum": int, "val": float})
     )
     return df
+
+
+# Open Ephys Neuropix-PXI plugin probe type strings (``probeTypeToString``)
+# mapped to PixelMap probe types. Types absent here are not supported by
+# PixelMap and are rejected when loading a survey.
+OPENEPHYS_PROBE_TYPE_MAP = {
+    "Neuropixels 1.0": "1.0",
+    "Neuropixels 2.0 Single Shank": "2.0-1shank",
+    "Neuropixels 2.0 Multi Shank": "2.0-4shanks",
+    "Neuropixels 2.0 Quad Base": "QuadBase",
+}
+
+
+@dataclass
+class OpenEphysSurveyProbe:
+    """One probe's results from an Open Ephys survey JSON export."""
+
+    name: str
+    oe_type: str
+    probe_type: str | None  # PixelMap probe type, or None if unsupported
+    serial_number: str | None
+    survey_df: pd.DataFrame  # columns SURVEY_COLUMNS, surveyed contacts only
+
+    @property
+    def label(self) -> str:
+        serial = f", SN {self.serial_number}" if self.serial_number else ""
+        return f"{self.name} ({self.oe_type}{serial})"
+
+
+def is_openephys_survey(content: str) -> bool:
+    """Cheap sniff: does this look like a JSON document rather than a TSV?"""
+    return content.lstrip().startswith("{")
+
+
+def parse_openephys_survey_json(content: str) -> list[OpenEphysSurveyProbe]:
+    """
+    Parse an Open Ephys survey JSON (Neuropix-PXI plugin, Survey tab → Save).
+
+    The file holds a ``probes`` list; each probe has ``name``, ``type`` and an
+    ``electrodes`` list whose entries carry ``shank``, ``position_x_um``,
+    ``position_y_um`` (shank-local, 0 at the lowest site), ``peak_to_peak``,
+    ``was_surveyed`` and ``is_reference``. Unsurveyed electrodes report 0 and
+    reference sites carry no signal, so both are dropped.
+
+    Each probe's surveyed contacts are converted to the same
+    (shank, xum, zum, val) DataFrame that :func:`parse_survey_file` produces,
+    so downstream matching is format-agnostic.
+
+    Raises ValueError if the JSON is malformed or contains no surveyed probes.
+    """
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Could not parse survey file as JSON: {e}") from e
+
+    raw_probes = data.get("probes") if isinstance(data, dict) else None
+    if not isinstance(raw_probes, list) or not raw_probes:
+        raise ValueError(
+            "JSON file has no 'probes' list — expected an Open Ephys survey export."
+        )
+
+    probes: list[OpenEphysSurveyProbe] = []
+    for i, raw in enumerate(raw_probes):
+        electrodes = raw.get("electrodes") if isinstance(raw, dict) else None
+        if not isinstance(electrodes, list) or not electrodes:
+            raise ValueError(f"Probe #{i} in survey JSON has no 'electrodes' list.")
+        rows = []
+        for e in electrodes:
+            try:
+                if not e.get("was_surveyed", True) or e.get("is_reference", False):
+                    continue
+                rows.append((
+                    int(e["shank"]),
+                    float(e["position_x_um"]),
+                    float(e["position_y_um"]),
+                    float(e["peak_to_peak"]),
+                ))
+            except (AttributeError, KeyError, TypeError, ValueError) as err:
+                raise ValueError(
+                    f"Malformed electrode entry in probe #{i} of survey JSON: {err}"
+                ) from err
+        if not rows:
+            continue
+        oe_type = str(raw.get("type", "Unknown"))
+        serial = raw.get("serial_number")
+        probes.append(OpenEphysSurveyProbe(
+            name=str(raw.get("name", f"Probe {i}")),
+            oe_type=oe_type,
+            probe_type=OPENEPHYS_PROBE_TYPE_MAP.get(oe_type),
+            serial_number=str(serial) if serial else None,
+            survey_df=pd.DataFrame(rows, columns=list(SURVEY_COLUMNS)),
+        ))
+
+    if not probes:
+        raise ValueError("Survey JSON contains no surveyed electrodes.")
+    return probes
 
 
 def _shank_local_positions(positions_df: pd.DataFrame) -> dict[int, np.ndarray]:

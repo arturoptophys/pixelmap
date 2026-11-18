@@ -1,5 +1,6 @@
 """Tests for pixelmap.utils.survey — survey .txt parsing and probe-match."""
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -158,3 +159,115 @@ class TestDefaultSurveyRange:
     def test_empty_survey_gets_a_safe_default(self):
         assert survey.default_survey_range([]) == (0.0, 1.0)
         assert survey.default_survey_range([float("nan")]) == (0.0, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Open Ephys (Neuropix-PXI plugin) survey JSON
+# ---------------------------------------------------------------------------
+
+
+def _oe_electrodes(oe_type: str, surveyed_shanks=None, val_of=lambda s, x, y: float(y)):
+    """Electrode list built with the plugin's Geometry.cpp formulas."""
+    out = []
+    if oe_type == "Neuropixels 1.0":
+        n_per_shank, n_shanks = 960, 1
+    elif oe_type == "Neuropixels 2.0 Single Shank":
+        n_per_shank, n_shanks = 1280, 1
+    else:
+        n_per_shank, n_shanks = 1280, 4
+    for i in range(n_per_shank * n_shanks):
+        shank, local = divmod(i, n_per_shank)
+        if oe_type == "Neuropixels 1.0":
+            x = [27.0, 59.0, 11.0, 43.0][i % 4]
+            y = (i - i % 2) * 10.0
+        else:
+            x = i % 2 * 32.0 + 27.0
+            y = (local - local % 2) * 7.5
+        surveyed = surveyed_shanks is None or shank in surveyed_shanks
+        out.append({
+            "global_index": i, "shank": shank, "column": i % 2, "row": local // 2,
+            "bank": "A", "is_reference": False,
+            "position_x_um": x, "position_y_um": y,
+            "was_surveyed": surveyed,
+            "peak_to_peak": val_of(shank, x, y) if surveyed else 0.0,
+        })
+    return out
+
+
+def _oe_survey_json(*probes) -> str:
+    """probes: (name, oe_type, electrodes) tuples."""
+    return json.dumps({
+        "generated_at": "2026-01-01T00:00:00.000Z",
+        "seconds_per_configuration": 2.0,
+        "probe_count": len(probes),
+        "probes": [
+            {"name": name, "type": oe_type, "shank_count": 1, "sample_rate": 30000.0,
+             "serial_number": "123", "banks_surveyed": ["A"], "shanks_surveyed": [0],
+             "electrodes": electrodes}
+            for name, oe_type, electrodes in probes
+        ],
+    })
+
+
+@pytest.mark.parametrize("oe_type, probe_type", [
+    ("Neuropixels 1.0", "1.0"),
+    ("Neuropixels 2.0 Single Shank", "2.0-1shank"),
+    ("Neuropixels 2.0 Multi Shank", "2.0-4shanks"),
+])
+def test_openephys_json_matches_probe(wiring_maps_dir, oe_type, probe_type):
+    positions_df = pd.read_csv(wiring_maps_dir / WIRING_FILE_MAP[probe_type][0])
+    content = _oe_survey_json(("ProbeA", oe_type, _oe_electrodes(oe_type)))
+    assert survey.is_openephys_survey(content)
+
+    (probe,) = survey.parse_openephys_survey_json(content)
+    assert probe.probe_type == probe_type
+    assert list(probe.survey_df.columns) == list(survey.SURVEY_COLUMNS)
+
+    values, n_unmatched = survey.validate_probe_match(probe.survey_df, positions_df)
+    assert n_unmatched == 0
+    assert len(values) == len(positions_df)
+    # val encodes y, so every electrode must land on a site at the same depth
+    y_by_elec = {
+        Electrode(int(s), int(e)): y
+        for s, e, y in positions_df[["shank", "electrode", "y"]].itertuples(index=False)
+    }
+    for elec, val in values.items():
+        assert val == pytest.approx(y_by_elec[elec])
+
+
+def test_openephys_json_drops_unsurveyed_and_reference():
+    electrodes = _oe_electrodes("Neuropixels 2.0 Multi Shank", surveyed_shanks={1})
+    electrodes[1280]["is_reference"] = True  # first site on shank 1
+    (probe,) = survey.parse_openephys_survey_json(
+        _oe_survey_json(("P", "Neuropixels 2.0 Multi Shank", electrodes))
+    )
+    assert set(probe.survey_df["shank"]) == {1}
+    assert len(probe.survey_df) == 1279
+
+
+def test_openephys_json_multi_probe_and_unsupported_type():
+    content = _oe_survey_json(
+        ("P1", "Neuropixels 1.0", _oe_electrodes("Neuropixels 1.0")),
+        ("P2", "Neuropixels UHD (Fixed)", _oe_electrodes("Neuropixels 1.0")),
+        ("P3", "Neuropixels 2.0 Single Shank",
+         _oe_electrodes("Neuropixels 2.0 Single Shank", surveyed_shanks=set())),
+    )
+    probes = survey.parse_openephys_survey_json(content)
+    # P3 has no surveyed electrodes and is skipped entirely
+    assert [p.name for p in probes] == ["P1", "P2"]
+    assert probes[1].probe_type is None
+    assert "SN 123" in probes[0].label
+
+
+@pytest.mark.parametrize("content, match", [
+    ("{not json", "Could not parse survey file as JSON"),
+    ('{"probes": []}', "no 'probes' list"),
+    ('{"probes": [{"name": "x", "electrodes": [{"shank": 0}]}]}', "Malformed electrode entry"),
+])
+def test_openephys_json_errors(content, match):
+    with pytest.raises(ValueError, match=match):
+        survey.parse_openephys_survey_json(content)
+
+
+def test_spikeglx_txt_is_not_sniffed_as_json():
+    assert not survey.is_openephys_survey((FIXTURES / "survey_1.0.txt").read_text())
